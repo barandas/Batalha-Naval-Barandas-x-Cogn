@@ -137,6 +137,7 @@
 
     function setConnection(online) {
         const el = $('connection-indicator');
+        el.hidden = false;
         el.textContent = online ? 'online' : 'offline';
         el.classList.toggle('online', online);
         el.classList.toggle('offline', !online);
