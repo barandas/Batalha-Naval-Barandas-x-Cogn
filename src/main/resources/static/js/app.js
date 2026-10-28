@@ -105,7 +105,7 @@
         state.session = null;
         state.view = null;
         sessionStorage.removeItem(STORAGE_KEY);
-        setConnection(false);
+        $('connection-indicator').hidden = true;
         hideModal();
         showScreen('screen-home');
     }
