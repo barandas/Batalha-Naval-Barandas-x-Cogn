@@ -73,6 +73,15 @@ Saída voluntária (botão "Sair" → `POST /api/games/{gameId}/leave`) e queda 
   (`battleship.reconnect-grace`, padrão `60s`). Recarregar a página ou reconectar dentro do prazo cancela o prazo.
 - Após um W.O. (ou se o oponente sair depois do fim), quem ficou pode reabrir a vaga ("Aguardar novo oponente") para um novo jogador entrar pelo código.
 
+### Segurança e memória
+
+- Cada conexão WebSocket se identifica no `CONNECT` com os cabeçalhos `gameId` e `playerId` (`PlayerChannelInterceptor`).
+  Depois disso ela só pode assinar os próprios tópicos e enviar jogadas para a própria partida; a jogada vale para o
+  jogador da conexão, não para um `playerId` no corpo da mensagem.
+- Os códigos de sala são gerados com `SecureRandom`.
+- Partidas sem nenhuma ação há `battleship.idle-timeout` (padrão `30m`) e sem nenhuma aba aberta são removidas da
+  memória (`IdleGameCleaner`, a cada `battleship.cleanup-interval`, padrão `PT5M`).
+
 ## Arquitetura
 
 ```
@@ -154,4 +163,5 @@ partida inexistente).
 ## Limitações conhecidas
 
 - Partidas ficam em memória: reiniciar o servidor encerra as salas.
-- O `playerId` (UUID) funciona como token do jogador; não há autenticação.
+- Não há contas de usuário: o `playerId` (UUID aleatório, enviado só ao próprio jogador) funciona como token secreto.
+  Quem obtiver o `playerId` de alguém pode agir como essa pessoa.

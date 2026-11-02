@@ -99,6 +99,11 @@ public class PresenceTracker {
         }
     }
 
+    /** Whether some open page is subscribed to the updates of a player of this game. */
+    public synchronized boolean isWatched(String gameId) {
+        return liveSubscriptions.keySet().stream().anyMatch(k -> k.gameId().equals(gameId));
+    }
+
     private void release(PlayerKey key) {
         Optional<DisconnectTicket> ticket;
         synchronized (this) {

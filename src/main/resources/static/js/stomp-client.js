@@ -16,10 +16,11 @@
             this.nextId = 0;
         }
 
-        connect(onConnect, onClose) {
+        connect(onConnect, onClose, connectHeaders = {}) {
             this.ws = new WebSocket(this.url);
             this.ws.onopen = () => {
-                this._sendFrame('CONNECT', {'accept-version': '1.2', host: location.host, 'heart-beat': '0,0'});
+                this._sendFrame('CONNECT', Object.assign(
+                    {'accept-version': '1.2', host: location.host, 'heart-beat': '0,0'}, connectHeaders));
             };
             this.ws.onmessage = (event) => this._handleData(event.data, onConnect);
             this.ws.onclose = () => {

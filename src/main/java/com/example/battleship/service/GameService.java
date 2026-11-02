@@ -14,13 +14,16 @@ import com.example.battleship.model.ShipPlacement;
 import com.example.battleship.model.ShipType;
 import com.example.battleship.model.ShotOutcome;
 import com.example.battleship.repository.GameRepository;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -49,7 +52,7 @@ public class GameService {
     @Autowired
     public GameService(GameRepository repository, AIService aiService,
                        @Value("${battleship.reconnect-grace:60s}") Duration reconnectGrace) {
-        this(repository, aiService, new Random(), Clock.systemUTC(), reconnectGrace);
+        this(repository, aiService, new SecureRandom(), Clock.systemUTC(), reconnectGrace);
     }
 
     public GameService(GameRepository repository, AIService aiService, Random random) {
@@ -116,6 +119,16 @@ public class GameService {
     public Game getGame(String gameId) {
         return repository.findById(gameId)
                 .orElseThrow(() -> new GameNotFoundException("Partida não encontrada: " + gameId));
+    }
+
+    public boolean isHumanPlayer(String gameId, String playerId) {
+        return repository.findById(gameId)
+                .map(game -> {
+                    synchronized (game) {
+                        return game.findPlayer(playerId).filter(p -> !p.isAi() && !p.isDeparted()).isPresent();
+                    }
+                })
+                .orElse(false);
     }
 
     public List<ShipPlacement> generateRandomFleet() {
@@ -209,6 +222,27 @@ public class GameService {
             }
             return game;
         }
+    }
+
+    /**
+     * Removes games nobody has acted on since {@code idleTimeout} and that no open page is watching, so finished
+     * or abandoned games do not pile up in memory.
+     *
+     * @return how many games were removed
+     */
+    public int evictIdleGames(Duration idleTimeout, Predicate<String> watched) {
+        Instant cutoff = clock.instant().minus(idleTimeout);
+        int evicted = 0;
+        for (Game game : List.copyOf(repository.findAll())) {
+            synchronized (game) {
+                if (game.getLastActivity().isBefore(cutoff) && !watched.test(game.getId())
+                        && repository.findById(game.getId()).isPresent()) {
+                    repository.delete(game);
+                    evicted++;
+                }
+            }
+        }
+        return evicted;
     }
 
     /** Voluntary exit. Takes effect immediately; see the class documentation for the outcome. */

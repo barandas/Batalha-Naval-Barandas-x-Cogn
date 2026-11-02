@@ -126,6 +126,7 @@
         state.view = null;
         sessionStorage.removeItem(STORAGE_KEY);
         $('connection-indicator').hidden = true;
+        $('btn-show-result').hidden = true;
         hideModal();
         showScreen('screen-home');
     }
@@ -150,9 +151,10 @@
         }, () => {
             setConnection(false);
             if (state.stomp === client && state.session === session) {
+                refresh(); // volta ao menu se a partida não existir mais
                 setTimeout(() => { if (state.stomp === client) connectSocket(); }, 2000);
             }
-        });
+        }, {gameId: session.gameId, playerId: session.playerId});
     }
 
     function setConnection(online) {
@@ -382,7 +384,7 @@
         renderStatus(view, previous);
         renderOpponentPresence(view, previous);
         renderLog(view.events);
-        renderGameOver(view);
+        renderGameOver(view, previous);
     }
 
     function lastShotClass(view, r, c, onEnemyBoard) {
@@ -492,11 +494,16 @@
         });
     }
 
-    function renderGameOver(view) {
+    function renderGameOver(view, previous) {
+        $('btn-show-result').hidden = view.state !== 'FINISHED' || !state.modalDismissed;
         if (view.state !== 'FINISHED') {
             hideModal();
             return;
         }
+        const newsFromOpponent = !previous
+            || (view.rematchRequestedByOpponent && !previous.rematchRequestedByOpponent)
+            || (view.opponentLeft && !previous.opponentLeft);
+        if (newsFromOpponent) showResult();
         $('gameover-title').textContent = view.youWon
             ? (isForfeit(view) ? '🏆 Vitória por W.O.' : '🏆 Vitória!') : '💥 Derrota';
         if (view.endReason === 'OPPONENT_LEFT') {
@@ -519,6 +526,12 @@
         $('rematch-status').textContent = rematch;
         $('btn-rematch').disabled = view.rematchRequestedByYou;
         if (!state.modalDismissed) $('gameover-modal').classList.remove('hidden');
+    }
+
+    function showResult() {
+        state.modalDismissed = false;
+        $('btn-show-result').hidden = true;
+        $('gameover-modal').classList.remove('hidden');
     }
 
     function hideModal() {
@@ -552,7 +565,12 @@
 
     function initGameControls() {
         $('btn-rematch').addEventListener('click', requestRematch);
-        $('btn-view-boards').addEventListener('click', () => { state.modalDismissed = true; hideModal(); });
+        $('btn-view-boards').addEventListener('click', () => {
+            state.modalDismissed = true;
+            hideModal();
+            $('btn-show-result').hidden = false;
+        });
+        $('btn-show-result').addEventListener('click', showResult);
         $('btn-menu').addEventListener('click', leaveGame);
         $('btn-leave').addEventListener('click', leaveGame);
         $('btn-copy-code').addEventListener('click', () => {
