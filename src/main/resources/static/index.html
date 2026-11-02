@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batalha Naval</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="app-header">
+    <h1>⚓ Batalha Naval</h1>
+    <span id="connection-indicator" class="connection offline" title="Conexão WebSocket" hidden>offline</span>
+</header>
+
+<main>
+    <!-- Tela inicial -->
+    <section id="screen-home" class="screen active">
+        <div class="card home-card">
+            <h2>Bem-vindo, almirante!</h2>
+            <label class="field">
+                <span>Seu nome</span>
+                <input id="player-name" type="text" maxlength="20" placeholder="Digite seu nome" autocomplete="nickname">
+            </label>
+
+            <div class="mode-tabs" role="tablist">
+                <button class="tab active" data-mode="SINGLE_PLAYER" role="tab">Contra o computador</button>
+                <button class="tab" data-mode="MULTIPLAYER" role="tab">Multiplayer</button>
+            </div>
+
+            <div id="panel-single" class="mode-panel active">
+                <label class="field">
+                    <span>Dificuldade</span>
+                    <select id="difficulty">
+                        <option value="EASY">Fácil — tiros aleatórios</option>
+                        <option value="MEDIUM" selected>Médio — caça e alvo</option>
+                        <option value="HARD">Difícil — probabilidade + paridade</option>
+                    </select>
+                </label>
+                <button id="btn-start-single" class="btn primary">Jogar</button>
+            </div>
+
+            <div id="panel-multi" class="mode-panel">
+                <button id="btn-create-room" class="btn primary">Criar sala</button>
+                <div class="divider"><span>ou</span></div>
+                <label class="field">
+                    <span>Código da sala</span>
+                    <input id="room-code" type="text" maxlength="6" placeholder="Ex.: K7Q2PZ" autocomplete="off">
+                </label>
+                <button id="btn-join-room" class="btn">Entrar na sala</button>
+            </div>
+            <p id="home-error" class="error" role="alert"></p>
+        </div>
+    </section>
+
+    <!-- Tela de jogo -->
+    <section id="screen-game" class="screen">
+        <div class="game-header card">
+            <div class="players">
+                <span id="label-me" class="player-tag me"></span>
+                <span class="vs">vs</span>
+                <span id="label-opponent" class="player-tag opponent"></span>
+            </div>
+            <div id="room-info" class="room-info hidden">
+                Código da sala: <strong id="room-code-display"></strong>
+                <button id="btn-copy-code" class="btn small" title="Copiar código">Copiar</button>
+            </div>
+            <div id="turn-indicator" class="turn-indicator"></div>
+            <div id="status-message" class="status-message" aria-live="polite"></div>
+        </div>
+
+        <div class="boards">
+            <div class="board-panel">
+                <h3>Sua frota</h3>
+                <div id="own-board" class="board"></div>
+                <ul id="own-fleet" class="fleet-status"></ul>
+            </div>
+
+            <div id="placement-panel" class="board-panel placement-panel card">
+                <h3>Posicione sua frota</h3>
+                <p class="hint">Escolha um navio, clique no seu tabuleiro para posicioná-lo.
+                    Use <kbd>R</kbd> ou o botão abaixo para girar. Clique num navio já posicionado para movê-lo.</p>
+                <ul id="ship-picker" class="ship-picker"></ul>
+                <div class="placement-actions">
+                    <button id="btn-rotate" class="btn">↻ Girar (<span id="orientation-label">horizontal</span>)</button>
+                    <button id="btn-random" class="btn">🎲 Aleatório</button>
+                    <button id="btn-clear" class="btn">Limpar</button>
+                </div>
+                <button id="btn-ready" class="btn primary" disabled>Confirmar frota</button>
+                <p id="placement-error" class="error" role="alert"></p>
+            </div>
+
+            <div id="enemy-panel" class="board-panel hidden">
+                <h3>Frota inimiga</h3>
+                <div id="enemy-board" class="board enemy"></div>
+                <ul id="enemy-fleet" class="fleet-status"></ul>
+            </div>
+        </div>
+
+        <div class="card log-card">
+            <h3>Diário de bordo</h3>
+            <ul id="event-log" class="event-log"></ul>
+        </div>
+        <button id="btn-leave" class="btn link">Sair para o menu</button>
+    </section>
+</main>
+
+<!-- Fim de jogo -->
+<div id="gameover-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="gameover-title">
+    <div class="modal-content card">
+        <h2 id="gameover-title"></h2>
+        <p id="gameover-text"></p>
+        <p id="rematch-status" class="hint"></p>
+        <div class="modal-actions">
+            <button id="btn-rematch" class="btn primary">Revanche</button>
+            <button id="btn-view-boards" class="btn">Ver tabuleiros</button>
+            <button id="btn-menu" class="btn">Menu inicial</button>
+        </div>
+    </div>
+</div>
+
+<script src="js/stomp-client.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
