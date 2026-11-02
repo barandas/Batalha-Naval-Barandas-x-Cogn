@@ -116,6 +116,7 @@ kbd { background: #0e2742; border: 1px solid #3b6c99; border-radius: 4px; paddin
 .status-message.sunk { color: #ff8f8f; }
 .status-message.miss { color: var(--miss); }
 .status-message.error { color: var(--danger); }
+.opponent-status { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--danger); color: var(--danger); font-weight: 500; }
 
 .boards { display: flex; flex-wrap: wrap; gap: 32px; justify-content: center; align-items: flex-start; }
 .board-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; }

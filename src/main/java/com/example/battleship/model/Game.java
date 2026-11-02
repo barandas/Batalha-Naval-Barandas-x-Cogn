@@ -28,6 +28,7 @@ public class Game {
     private int startingPlayerIndex;
     private int round = 1;
     private LastShot lastShot;
+    private GameEndReason endReason;
 
     public Game(String roomCode, GameMode mode, Difficulty difficulty) {
         this.roomCode = roomCode;
@@ -40,6 +41,10 @@ public class Game {
             throw new InvalidMoveException("A sala " + roomCode + " já está cheia.");
         }
         players.add(player);
+    }
+
+    public void removePlayer(Player player) {
+        players.remove(player);
     }
 
     public boolean isFull() {
@@ -157,5 +162,13 @@ public class Game {
 
     public void setLastShot(LastShot lastShot) {
         this.lastShot = lastShot;
+    }
+
+    public GameEndReason getEndReason() {
+        return endReason;
+    }
+
+    public void setEndReason(GameEndReason endReason) {
+        this.endReason = endReason;
     }
 }

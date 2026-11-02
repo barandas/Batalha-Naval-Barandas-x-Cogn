@@ -20,7 +20,8 @@
         round: null,
         stomp: null,
         placement: {ships: {}, selected: 'CARRIER', orientation: 'HORIZONTAL', hover: null},
-        modalDismissed: false
+        modalDismissed: false,
+        countdown: null
     };
 
     const $ = (id) => document.getElementById(id);
@@ -99,7 +100,26 @@
         render(joinResponse.game);
     }
 
-    function leaveGame() {
+    async function leaveGame() {
+        const session = state.session;
+        const v = state.view;
+        if (v && v.mode === 'MULTIPLAYER' && v.state === 'IN_PROGRESS'
+            && !confirm('Sair agora encerra a batalha e dá a vitória por W.O. a ' + v.opponentName + '. Deseja sair?')) {
+            return;
+        }
+        if (session) {
+            try {
+                await api('/' + session.gameId + '/leave', {method: 'POST', body: {playerId: session.playerId}});
+            } catch (e) {
+                // the game may already be gone; leave locally anyway
+            }
+        }
+        returnHome();
+    }
+
+    function returnHome() {
+        clearInterval(state.countdown);
+        $('opponent-status').hidden = true;
         if (state.stomp) state.stomp.disconnect();
         state.stomp = null;
         state.session = null;
@@ -148,7 +168,7 @@
         try {
             render(await api('/' + state.session.gameId + '?playerId=' + encodeURIComponent(state.session.playerId)));
         } catch (e) {
-            if (e.status === 404 || e.status === 400) leaveGame();
+            if (e.status === 404 || e.status === 400) returnHome();
         }
     }
 
@@ -360,6 +380,7 @@
         renderFleet($('own-fleet'), view.yourFleet);
         renderFleet($('enemy-fleet'), view.enemyFleet);
         renderStatus(view, previous);
+        renderOpponentPresence(view, previous);
         renderLog(view.events);
         renderGameOver(view);
     }
@@ -397,7 +418,7 @@
                 turnClass = view.yourTurn ? 'your-turn' : 'their-turn';
                 break;
             case 'FINISHED':
-                turnText = view.youWon ? 'Vitória!' : 'Derrota.';
+                turnText = view.youWon ? (isForfeit(view) ? 'Vitória por W.O.' : 'Vitória!') : 'Derrota.';
                 turnClass = view.youWon ? 'your-turn' : 'their-turn';
                 break;
         }
@@ -411,6 +432,33 @@
         } else if (!shot) {
             $('status-message').textContent = '';
             $('status-message').className = 'status-message';
+        }
+    }
+
+    function isForfeit(view) {
+        return view.endReason === 'OPPONENT_LEFT' || view.endReason === 'OPPONENT_DISCONNECTED';
+    }
+
+    function renderOpponentPresence(view, previous) {
+        clearInterval(state.countdown);
+        const box = $('opponent-status');
+        const deadline = view.opponentReconnectDeadline;
+        if (deadline && view.state !== 'FINISHED') {
+            const tick = () => {
+                const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+                box.textContent = view.opponentName + ' perdeu a conexão. Aguardando reconexão (' + seconds + ' s)...';
+            };
+            tick();
+            state.countdown = setInterval(tick, 1000);
+            box.hidden = false;
+        } else {
+            box.hidden = true;
+        }
+        if (!previous || previous.gameId !== view.gameId) return;
+        if (previous.opponentName && !view.opponentName && view.events.length) {
+            flash(view.events[0], true);
+        } else if (previous.opponentReconnectDeadline && !deadline && view.opponentConnected) {
+            flash(view.opponentName + ' reconectou.', false);
         }
     }
 
@@ -449,12 +497,21 @@
             hideModal();
             return;
         }
-        $('gameover-title').textContent = view.youWon ? '🏆 Vitória!' : '💥 Derrota';
-        $('gameover-text').textContent = view.youWon
-            ? 'Você afundou toda a frota de ' + view.opponentName + '!'
-            : view.opponentName + ' afundou toda a sua frota.';
+        $('gameover-title').textContent = view.youWon
+            ? (isForfeit(view) ? '🏆 Vitória por W.O.' : '🏆 Vitória!') : '💥 Derrota';
+        if (view.endReason === 'OPPONENT_LEFT') {
+            $('gameover-text').textContent = view.opponentName + ' abandonou a partida.';
+        } else if (view.endReason === 'OPPONENT_DISCONNECTED') {
+            $('gameover-text').textContent = view.opponentName + ' perdeu a conexão e não voltou a tempo.';
+        } else {
+            $('gameover-text').textContent = view.youWon
+                ? 'Você afundou toda a frota de ' + view.opponentName + '!'
+                : view.opponentName + ' afundou toda a sua frota.';
+        }
+        $('btn-rematch').textContent = view.opponentLeft ? 'Aguardar novo oponente' : 'Revanche';
         let rematch = '';
-        if (view.rematchRequestedByYou) rematch = 'Aguardando ' + view.opponentName + ' aceitar a revanche...';
+        if (view.opponentLeft) rematch = 'A sala continua aberta com o código ' + view.roomCode + '.';
+        else if (view.rematchRequestedByYou) rematch = 'Aguardando ' + view.opponentName + ' aceitar a revanche...';
         else if (view.rematchRequestedByOpponent) rematch = view.opponentName + ' quer revanche!';
         $('rematch-status').textContent = rematch;
         $('btn-rematch').disabled = view.rematchRequestedByYou;

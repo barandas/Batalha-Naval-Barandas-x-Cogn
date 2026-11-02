@@ -16,6 +16,7 @@ import com.example.battleship.model.Game;
 import com.example.battleship.model.GameMode;
 import com.example.battleship.model.InvalidMoveException;
 import com.example.battleship.model.Player;
+import com.example.battleship.service.DepartureResult;
 import com.example.battleship.service.GameNotFoundException;
 import com.example.battleship.service.GameService;
 import com.example.battleship.service.PlayerSession;
@@ -131,7 +132,7 @@ class GameRestControllerTest {
     void randomFleetEndpointReturnsFiveShips() throws Exception {
         when(gameService.generateRandomFleet()).thenReturn(new GameService(
                 new com.example.battleship.repository.GameRepository(),
-                new com.example.battleship.service.AIService()).generateRandomFleet());
+                new com.example.battleship.service.AIService(), new java.util.Random()).generateRandomFleet());
 
         mvc.perform(get("/api/games/random-fleet"))
                 .andExpect(status().isOk())
@@ -143,5 +144,28 @@ class GameRestControllerTest {
         mvc.perform(get("/api/games/{id}", "g1"))
                 .andExpect(status().isBadRequest());
         verify(gameService, org.mockito.Mockito.never()).getGame(anyString());
+    }
+
+    @Test
+    void leavingNotifiesTheRemainingPlayer() throws Exception {
+        Game game = new Game("ABC123", GameMode.MULTIPLAYER, null);
+        when(gameService.leaveGame("g1", "p1")).thenReturn(DepartureResult.FORFEIT);
+        when(gameService.getGame("g1")).thenReturn(game);
+
+        mvc.perform(post("/api/games/{id}/leave", "g1").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"p1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value("FORFEIT"));
+        verify(publisher).publish(game);
+    }
+
+    @Test
+    void leavingACancelledGamePublishesNothing() throws Exception {
+        when(gameService.leaveGame("g1", "p1")).thenReturn(DepartureResult.CANCELLED);
+
+        mvc.perform(post("/api/games/{id}/leave", "g1").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"p1\"}"))
+                .andExpect(jsonPath("$.result").value("CANCELLED"));
+        verify(publisher, org.mockito.Mockito.never()).publish(any());
     }
 }
