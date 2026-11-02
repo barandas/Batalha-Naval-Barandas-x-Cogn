@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: batalha-naval
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    autoDeploy: true

@@ -34,6 +34,18 @@ java -jar target/battleship-1.0.0-SNAPSHOT.jar
 2. Jogador B (outra aba/navegador/máquina na mesma rede, usando o IP do host) escolhe **Entrar na sala** com o código.
 3. Ambos posicionam a frota e confirmam; o criador da sala começa. Na revanche, quem começa alterna.
 
+### Publicando na internet (Render, plano gratuito)
+
+O repositório tem `Dockerfile` e `render.yaml` (Blueprint do Render):
+
+1. Entre em <https://render.com> com a conta do GitHub e autorize o acesso a este repositório.
+2. **New → Blueprint**, escolha o repositório e a branch `main`, e clique em **Apply**.
+3. Ao terminar o build, o jogo fica em `https://batalha-naval-<sufixo>.onrender.com`. Cada push na `main` gera um deploy novo.
+
+No plano gratuito, o serviço dorme depois de 15 min sem acesso. O primeiro acesso seguinte leva cerca de 1 min. Como as partidas ficam em memória, dormir ou fazer um deploy encerra as salas abertas.
+
+Para testar a imagem localmente: `docker build -t batalha-naval . && docker run -p 8080:8080 batalha-naval`.
+
 ## Regras implementadas
 
 - Tabuleiro 10x10 (linhas A–J, colunas 1–10).
