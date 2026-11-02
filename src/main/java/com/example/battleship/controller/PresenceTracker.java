@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -102,6 +103,14 @@ public class PresenceTracker {
     /** Whether some open page is subscribed to the updates of a player of this game. */
     public synchronized boolean isWatched(String gameId) {
         return liveSubscriptions.keySet().stream().anyMatch(k -> k.gameId().equals(gameId));
+    }
+
+    /**
+     * Runs {@code action} while no subscription can come or go. Locks are always taken presence first, then game
+     * (as in {@link #onSubscribe}), so {@code action} may lock games.
+     */
+    public synchronized <T> T withPresenceFrozen(Supplier<T> action) {
+        return action.get();
     }
 
     private void release(PlayerKey key) {

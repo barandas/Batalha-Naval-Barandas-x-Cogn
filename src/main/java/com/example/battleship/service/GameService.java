@@ -226,7 +226,8 @@ public class GameService {
 
     /**
      * Removes games nobody has acted on since {@code idleTimeout} and that no open page is watching, so finished
-     * or abandoned games do not pile up in memory.
+     * or abandoned games do not pile up in memory. {@code watched} is called while holding a game's lock, so it must
+     * not wait for a lock that is held while locking a game.
      *
      * @return how many games were removed
      */

@@ -28,7 +28,8 @@ public class IdleGameCleaner {
     @Scheduled(fixedDelayString = "${battleship.cleanup-interval:PT5M}",
             initialDelayString = "${battleship.cleanup-interval:PT5M}")
     public void evictIdleGames() {
-        int evicted = gameService.evictIdleGames(idleTimeout, presenceTracker::isWatched);
+        int evicted = presenceTracker.withPresenceFrozen(
+                () -> gameService.evictIdleGames(idleTimeout, presenceTracker::isWatched));
         if (evicted > 0) {
             log.info("Removed {} idle game(s) from memory", evicted);
         }

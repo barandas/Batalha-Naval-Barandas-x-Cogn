@@ -117,6 +117,20 @@ class PresenceIntegrationTest {
     }
 
     @Test
+    void aPlayerWhoLeftNoLongerReceivesUpdates() throws Exception {
+        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(host), host.playerId());
+        BlockingQueue<Map<String, Object>> guestUpdates = subscribe(connect(guest), guest.playerId());
+        Thread.sleep(300);
+
+        rest.postForObject("/api/games/" + host.gameId() + "/leave", Map.of("playerId", guest.playerId()), Map.class);
+        await(hostUpdates, v -> "FINISHED".equals(v.get("state")));
+        rest.postForObject("/api/games/" + host.gameId() + "/rematch", Map.of("playerId", host.playerId()), Map.class);
+        await(hostUpdates, v -> "WAITING_FOR_OPPONENT".equals(v.get("state")));
+
+        assertThat(guestUpdates.poll(500, TimeUnit.MILLISECONDS)).isNull();
+    }
+
+    @Test
     void anotherPlayersSessionCannotKeepADisconnectedPlayerPresent() throws Exception {
         StompSession hostSession = connect(host);
         subscribe(hostSession, host.playerId());
