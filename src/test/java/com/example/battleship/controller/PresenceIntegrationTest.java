@@ -24,6 +24,7 @@ import org.springframework.messaging.simp.stomp.StompFrameHandler;
 import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 
@@ -64,8 +65,8 @@ class PresenceIntegrationTest {
 
     @Test
     void persistentDisconnectionEndsTheBattleByForfeit() throws Exception {
-        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(), host.playerId());
-        StompSession guestSession = connect();
+        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(host), host.playerId());
+        StompSession guestSession = connect(guest);
         subscribe(guestSession, guest.playerId());
         Thread.sleep(300);
 
@@ -83,14 +84,14 @@ class PresenceIntegrationTest {
 
     @Test
     void reconnectingWithinTheGracePeriodKeepsTheBattle() throws Exception {
-        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(), host.playerId());
-        StompSession guestSession = connect();
+        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(host), host.playerId());
+        StompSession guestSession = connect(guest);
         subscribe(guestSession, guest.playerId());
         Thread.sleep(300);
 
         guestSession.disconnect();
         await(hostUpdates, v -> Boolean.FALSE.equals(v.get("opponentConnected")));
-        subscribe(connect(), guest.playerId());
+        subscribe(connect(guest), guest.playerId());
 
         Map<String, Object> back = await(hostUpdates, v -> Boolean.TRUE.equals(v.get("opponentConnected")));
         assertThat(back.get("state")).isEqualTo("IN_PROGRESS");
@@ -102,8 +103,8 @@ class PresenceIntegrationTest {
 
     @Test
     void voluntaryExitIsImmediateAndNotReportedAsADisconnection() throws Exception {
-        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(), host.playerId());
-        StompSession guestSession = connect();
+        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(host), host.playerId());
+        StompSession guestSession = connect(guest);
         subscribe(guestSession, guest.playerId());
         Thread.sleep(300);
 
@@ -115,8 +116,43 @@ class PresenceIntegrationTest {
         assertThat(hostUpdates.poll(500, TimeUnit.MILLISECONDS)).isNull();
     }
 
-    private StompSession connect() throws Exception {
-        return stompClient.connectAsync("ws://localhost:" + port + "/ws", new StompSessionHandlerAdapter() { })
+    @Test
+    void aPlayerWhoLeftNoLongerReceivesUpdates() throws Exception {
+        BlockingQueue<Map<String, Object>> hostUpdates = subscribe(connect(host), host.playerId());
+        BlockingQueue<Map<String, Object>> guestUpdates = subscribe(connect(guest), guest.playerId());
+        Thread.sleep(300);
+
+        rest.postForObject("/api/games/" + host.gameId() + "/leave", Map.of("playerId", guest.playerId()), Map.class);
+        await(hostUpdates, v -> "FINISHED".equals(v.get("state")));
+        rest.postForObject("/api/games/" + host.gameId() + "/rematch", Map.of("playerId", host.playerId()), Map.class);
+        await(hostUpdates, v -> "WAITING_FOR_OPPONENT".equals(v.get("state")));
+
+        assertThat(guestUpdates.poll(500, TimeUnit.MILLISECONDS)).isNull();
+    }
+
+    @Test
+    void anotherPlayersSessionCannotKeepADisconnectedPlayerPresent() throws Exception {
+        StompSession hostSession = connect(host);
+        subscribe(hostSession, host.playerId());
+        BlockingQueue<Map<String, Object>> guestUpdates = subscribe(connect(guest), guest.playerId());
+        Thread.sleep(300);
+
+        hostSession.disconnect();
+        await(guestUpdates, v -> Boolean.FALSE.equals(v.get("opponentConnected")));
+        StompSession spoof = connect(guest);
+        subscribe(spoof, host.playerId());
+
+        Map<String, Object> end = await(guestUpdates, v -> "FINISHED".equals(v.get("state")));
+        assertThat(end.get("endReason")).isEqualTo("OPPONENT_DISCONNECTED");
+        assertThat(end.get("youWon")).isEqualTo(true);
+    }
+
+    private StompSession connect(JoinResponse player) throws Exception {
+        StompHeaders headers = new StompHeaders();
+        headers.add("gameId", player.gameId());
+        headers.add("playerId", player.playerId());
+        return stompClient.connectAsync("ws://localhost:" + port + "/ws", new WebSocketHttpHeaders(), headers,
+                        new StompSessionHandlerAdapter() { })
                 .get(5, TimeUnit.SECONDS);
     }
 

@@ -29,6 +29,7 @@ public class Game {
     private int round = 1;
     private LastShot lastShot;
     private GameEndReason endReason;
+    private volatile Instant lastActivity = createdAt;
 
     public Game(String roomCode, GameMode mode, Difficulty difficulty) {
         this.roomCode = roomCode;
@@ -76,7 +77,9 @@ public class Game {
         return isFull() && players.stream().allMatch(Player::isReady);
     }
 
+    /** Every state change is logged as an event, so this also records the game's last activity. */
     public void addEvent(String event) {
+        lastActivity = Instant.now();
         events.addFirst(event);
         while (events.size() > MAX_EVENTS) {
             events.removeLast();
@@ -105,6 +108,10 @@ public class Game {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getLastActivity() {
+        return lastActivity;
     }
 
     public List<Player> getPlayers() {

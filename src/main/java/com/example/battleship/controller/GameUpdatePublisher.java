@@ -9,7 +9,7 @@ import java.util.List;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
-/** Pushes a personalised view of the game to every human player over STOMP. */
+/** Pushes a personalised view of the game to every human player still in it over STOMP. */
 @Component
 public class GameUpdatePublisher {
 
@@ -25,7 +25,7 @@ public class GameUpdatePublisher {
             players = List.copyOf(game.getPlayers());
         }
         for (Player player : players) {
-            if (!player.isAi()) {
+            if (!player.isAi() && !player.isDeparted()) {
                 messagingTemplate.convertAndSend(WebSocketConfig.playerTopic(game.getId(), player.getId()),
                         GameViewMapper.toView(game, player.getId()));
             }
