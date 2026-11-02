@@ -1,5 +1,6 @@
 package com.example.battleship.model;
 
+import java.time.Instant;
 import java.util.UUID;
 
 public class Player {
@@ -10,6 +11,10 @@ public class Player {
     private final Board board = new Board();
     private boolean ready;
     private boolean rematchRequested;
+    private boolean connected = true;
+    private boolean departed;
+    private Instant reconnectDeadline;
+    private long connectionEpoch;
 
     public Player(String name, boolean ai) {
         this(UUID.randomUUID().toString(), name, ai);
@@ -51,6 +56,44 @@ public class Player {
 
     public void setRematchRequested(boolean rematchRequested) {
         this.rematchRequested = rematchRequested;
+    }
+
+    public boolean isConnected() {
+        return connected;
+    }
+
+    /** Deadline for a disconnected player to come back; {@code null} while connected. */
+    public Instant getReconnectDeadline() {
+        return reconnectDeadline;
+    }
+
+    /** Incremented on every connection change, so stale disconnection timers can be recognised. */
+    public long getConnectionEpoch() {
+        return connectionEpoch;
+    }
+
+    public void markDisconnected(Instant deadline) {
+        connected = false;
+        reconnectDeadline = deadline;
+        connectionEpoch++;
+    }
+
+    public void markConnected() {
+        connected = true;
+        reconnectDeadline = null;
+        connectionEpoch++;
+    }
+
+    /** The player is no longer taking part (kept only so the final boards can still be shown). */
+    public boolean isDeparted() {
+        return departed;
+    }
+
+    public void markDeparted() {
+        departed = true;
+        connected = false;
+        reconnectDeadline = null;
+        connectionEpoch++;
     }
 
     public void resetForNewRound() {

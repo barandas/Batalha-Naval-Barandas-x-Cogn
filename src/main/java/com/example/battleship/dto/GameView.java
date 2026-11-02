@@ -1,6 +1,7 @@
 package com.example.battleship.dto;
 
 import com.example.battleship.model.Difficulty;
+import com.example.battleship.model.GameEndReason;
 import com.example.battleship.model.GameMode;
 import com.example.battleship.model.GameState;
 import java.util.List;
@@ -16,10 +17,14 @@ public record GameView(
         String playerId,
         String playerName,
         String opponentName,
+        boolean opponentConnected,
+        Long opponentReconnectDeadline,
+        boolean opponentLeft,
         boolean yourTurn,
         boolean youReady,
         boolean opponentReady,
         Boolean youWon,
+        GameEndReason endReason,
         boolean rematchRequestedByYou,
         boolean rematchRequestedByOpponent,
         CellState[][] ownBoard,

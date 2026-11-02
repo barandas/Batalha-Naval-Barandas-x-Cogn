@@ -5,12 +5,14 @@ import com.example.battleship.dto.GameView;
 import com.example.battleship.dto.GameViewMapper;
 import com.example.battleship.dto.JoinGameRequest;
 import com.example.battleship.dto.JoinResponse;
+import com.example.battleship.dto.LeaveResponse;
 import com.example.battleship.dto.PlaceFleetRequest;
 import com.example.battleship.dto.PlayerRequest;
 import com.example.battleship.dto.ShipPlacementDto;
 import com.example.battleship.dto.ShotRequest;
 import com.example.battleship.model.Coordinate;
 import com.example.battleship.model.Game;
+import com.example.battleship.service.DepartureResult;
 import com.example.battleship.service.GameService;
 import com.example.battleship.service.PlayerSession;
 import jakarta.validation.Valid;
@@ -82,6 +84,15 @@ public class GameRestController {
         Game game = gameService.requestRematch(gameId, request.playerId());
         publisher.publish(game);
         return GameViewMapper.toView(game, request.playerId());
+    }
+
+    @PostMapping("/{gameId}/leave")
+    public LeaveResponse leave(@PathVariable String gameId, @Valid @RequestBody PlayerRequest request) {
+        DepartureResult result = gameService.leaveGame(gameId, request.playerId());
+        if (result != DepartureResult.CANCELLED) {
+            publisher.publish(gameService.getGame(gameId));
+        }
+        return new LeaveResponse(result);
     }
 
     private static JoinResponse toResponse(PlayerSession session) {

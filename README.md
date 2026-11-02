@@ -45,6 +45,22 @@ java -jar target/battleship-1.0.0-SNAPSHOT.jar
   navios restantes são revelados apenas no fim da partida.
 - Tela de fim de jogo com revanche (no multiplayer, os dois precisam aceitar).
 
+### Abandono e desconexão
+
+Saída voluntária (botão "Sair" → `POST /api/games/{gameId}/leave`) e queda de conexão são tratadas separadamente:
+
+| Situação | Saída voluntária (efeito imediato) | Queda de conexão |
+|---|---|---|
+| Single player ou sozinho na sala | Partida cancelada (sala removida) | Sala cancelada se não reconectar a tempo |
+| Antes da batalha (espera/posicionamento) | Vaga reaberta com o mesmo código; quem ficou mantém a frota já posicionada | Vaga reaberta se não reconectar a tempo |
+| Após o fim da partida | Resultado mantido; quem ficou pode reabrir a vaga ("Aguardar novo oponente") | Idem, se não reconectar a tempo |
+| Durante a batalha | Quem ficou vence por W.O. (`endReason=OPPONENT_LEFT`) | Vitória por W.O. (`endReason=OPPONENT_DISCONNECTED`) se não reconectar a tempo |
+
+- A presença vem das inscrições STOMP no tópico do jogador (`PresenceTracker`): só quando a última sessão cai o
+  oponente é avisado (`opponentConnected=false`, `opponentReconnectDeadline`) e começa o prazo de reconexão
+  (`battleship.reconnect-grace`, padrão `60s`). Recarregar a página ou reconectar dentro do prazo cancela o prazo.
+- Após um W.O. (ou se o oponente sair depois do fim), quem ficou pode reabrir a vaga ("Aguardar novo oponente") para um novo jogador entrar pelo código.
+
 ## Arquitetura
 
 ```
@@ -95,7 +111,8 @@ src/main/resources/static        # index.html, css/style.css, js/app.js, js/stom
 | `GET` | `/api/games/random-fleet` | Sugestão de frota aleatória válida |
 | `POST` | `/api/games/{gameId}/fleet` | Confirma a frota `{playerId, ships: [{type, row, col, orientation}]}` |
 | `POST` | `/api/games/{gameId}/shots` | Atira `{playerId, row, col}` (alternativa REST ao STOMP) |
-| `POST` | `/api/games/{gameId}/rematch` | Pede revanche `{playerId}` |
+| `POST` | `/api/games/{gameId}/rematch` | Pede revanche `{playerId}` (ou reabre a vaga após W.O.) |
+| `POST` | `/api/games/{gameId}/leave` | Sai da partida `{playerId}` → `{result: CANCELLED \| SLOT_REOPENED \| FORFEIT \| RESULT_KEPT}` |
 
 Erros retornam `{timestamp, status, error, message, fieldErrors}` (400 para regra/validação, 404 para sala ou
 partida inexistente).
@@ -108,7 +125,7 @@ partida inexistente).
 
 ## Testes
 
-`mvn test` executa 74 testes:
+`mvn test` executa 96 testes:
 
 - `BoardTest`, `CoordinateTest`: posicionamento, limites, sobreposição, tiros (água/acerto/afundou), tiro repetido,
   frota destruída, posicionamento aleatório.
@@ -118,6 +135,9 @@ partida inexistente).
   comparação de desempenho entre níveis.
 - `GameRestControllerTest` (`@WebMvcTest`): contratos REST e `GlobalExceptionHandler`.
 - `GameWebSocketIntegrationTest`: fluxo multiplayer real com cliente STOMP.
+- `GameDepartureTest`: abandono (cancelamento, vaga reaberta, W.O.), queda temporária, reconexão e desconexão
+  persistente.
+- `PresenceIntegrationTest`: presença real via sessões STOMP (aviso, reconexão dentro do prazo, W.O. por desconexão).
 
 ## Limitações conhecidas
 

@@ -5,6 +5,7 @@ import com.example.battleship.dto.ErrorResponse;
 import com.example.battleship.dto.GameViewMapper;
 import com.example.battleship.model.Game;
 import com.example.battleship.model.Player;
+import java.util.List;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
@@ -19,7 +20,11 @@ public class GameUpdatePublisher {
     }
 
     public void publish(Game game) {
-        for (Player player : game.getPlayers()) {
+        List<Player> players;
+        synchronized (game) {
+            players = List.copyOf(game.getPlayers());
+        }
+        for (Player player : players) {
             if (!player.isAi()) {
                 messagingTemplate.convertAndSend(WebSocketConfig.playerTopic(game.getId(), player.getId()),
                         GameViewMapper.toView(game, player.getId()));

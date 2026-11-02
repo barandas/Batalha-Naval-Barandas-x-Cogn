@@ -4,6 +4,7 @@ import com.example.battleship.model.Board;
 import com.example.battleship.model.Coordinate;
 import com.example.battleship.model.Difficulty;
 import com.example.battleship.model.Game;
+import com.example.battleship.model.GameEndReason;
 import com.example.battleship.model.GameMode;
 import com.example.battleship.model.GameState;
 import com.example.battleship.model.InvalidMoveException;
@@ -13,34 +14,55 @@ import com.example.battleship.model.ShipPlacement;
 import com.example.battleship.model.ShipType;
 import com.example.battleship.model.ShotOutcome;
 import com.example.battleship.repository.GameRepository;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-/** Game rules: room management, fleet placement, alternating turns, victory and rematch. */
+/**
+ * Game rules: room management, fleet placement, alternating turns, victory and rematch, plus what happens when a
+ * participant leaves. A voluntary exit ({@link #leaveGame}) takes effect immediately; a dropped connection
+ * ({@link #playerDisconnected}) only counts as leaving if it is not recovered within the grace period
+ * ({@link #expireDisconnection}). Either way, before the battle the slot is reopened, during the battle the remaining
+ * player wins by forfeit and after the end the result is kept; a game without any other human is cancelled.
+ */
 @Service
 public class GameService {
 
     static final String ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     static final int ROOM_CODE_LENGTH = 6;
     private static final int MAX_NAME_LENGTH = 20;
+    public static final Duration DEFAULT_RECONNECT_GRACE = Duration.ofSeconds(60);
 
     private final GameRepository repository;
     private final AIService aiService;
     private final Random random;
+    private final Clock clock;
+    private final Duration reconnectGrace;
 
     @Autowired
-    public GameService(GameRepository repository, AIService aiService) {
-        this(repository, aiService, new Random());
+    public GameService(GameRepository repository, AIService aiService,
+                       @Value("${battleship.reconnect-grace:60s}") Duration reconnectGrace) {
+        this(repository, aiService, new Random(), Clock.systemUTC(), reconnectGrace);
     }
 
     public GameService(GameRepository repository, AIService aiService, Random random) {
+        this(repository, aiService, random, Clock.systemUTC(), DEFAULT_RECONNECT_GRACE);
+    }
+
+    public GameService(GameRepository repository, AIService aiService, Random random, Clock clock,
+                       Duration reconnectGrace) {
         this.repository = repository;
         this.aiService = aiService;
         this.random = random;
+        this.clock = clock;
+        this.reconnectGrace = reconnectGrace;
     }
 
     public PlayerSession createGame(String playerName, GameMode mode, Difficulty difficulty) {
@@ -71,10 +93,13 @@ public class GameService {
         Game game = repository.findByRoomCode(roomCode)
                 .orElseThrow(() -> new GameNotFoundException("Sala não encontrada: " + roomCode));
         synchronized (game) {
+            if (repository.findById(game.getId()).isEmpty()) {
+                throw new GameNotFoundException("Sala não encontrada: " + roomCode);
+            }
             if (game.getMode() != GameMode.MULTIPLAYER) {
                 throw new InvalidMoveException("Esta sala é de uma partida single player.");
             }
-            if (game.isFull()) {
+            if (game.isFull() || game.getState() != GameState.WAITING_FOR_OPPONENT) {
                 throw new InvalidMoveException("A sala " + game.getRoomCode() + " já está cheia.");
             }
             Player guest = new Player(sanitizeName(playerName), false);
@@ -163,9 +188,16 @@ public class GameService {
     public Game requestRematch(String gameId, String playerId) {
         Game game = getGame(gameId);
         synchronized (game) {
-            Player player = game.getPlayer(playerId);
+            Player player = requireActive(game, playerId);
             if (game.getState() != GameState.FINISHED) {
                 throw new InvalidMoveException("A revanche só pode ser pedida ao fim da partida.");
+            }
+            Optional<Player> departed = game.findOpponent(playerId).filter(Player::isDeparted);
+            if (departed.isPresent()) {
+                game.removePlayer(departed.get());
+                reopenSlot(game, player);
+                game.addEvent(player.getName() + " reabriu a vaga. Compartilhe o código " + game.getRoomCode() + ".");
+                return game;
             }
             player.setRematchRequested(true);
             game.getAiPlayer().ifPresent(ai -> ai.setRematchRequested(true));
@@ -179,6 +211,127 @@ public class GameService {
         }
     }
 
+    /** Voluntary exit. Takes effect immediately; see the class documentation for the outcome. */
+    public DepartureResult leaveGame(String gameId, String playerId) {
+        Game game = getGame(gameId);
+        synchronized (game) {
+            Player player = requireActive(game, playerId);
+            return removeParticipant(game, player, false);
+        }
+    }
+
+    /**
+     * Records that a player's last live connection dropped. Nothing is decided yet: the opponent is told and the
+     * returned ticket must be passed to {@link #expireDisconnection} once its grace period is over.
+     */
+    public Optional<DisconnectTicket> playerDisconnected(String gameId, String playerId) {
+        Optional<Game> found = repository.findById(gameId);
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        Game game = found.get();
+        synchronized (game) {
+            Optional<Player> player = game.findPlayer(playerId);
+            if (game.getMode() != GameMode.MULTIPLAYER || player.isEmpty() || player.get().isAi()
+                    || player.get().isDeparted() || !player.get().isConnected()) {
+                return Optional.empty();
+            }
+            Player p = player.get();
+            p.markDisconnected(clock.instant().plus(reconnectGrace));
+            game.addEvent(p.getName() + " perdeu a conexão. Aguardando reconexão por "
+                    + reconnectGrace.toSeconds() + " s...");
+            return Optional.of(new DisconnectTicket(gameId, playerId, p.getConnectionEpoch(), reconnectGrace));
+        }
+    }
+
+    /** @return whether the player was disconnected and is now back (the opponent should be told). */
+    public boolean playerConnected(String gameId, String playerId) {
+        Optional<Game> found = repository.findById(gameId);
+        if (found.isEmpty()) {
+            return false;
+        }
+        Game game = found.get();
+        synchronized (game) {
+            Optional<Player> player = game.findPlayer(playerId);
+            if (player.isEmpty() || player.get().isDeparted() || player.get().isConnected()) {
+                return false;
+            }
+            player.get().markConnected();
+            game.addEvent(player.get().getName() + " reconectou.");
+            return true;
+        }
+    }
+
+    /**
+     * Grace period over: if the player has not reconnected since the ticket was issued, the disconnection is
+     * treated as persistent and the player leaves the game.
+     */
+    public Optional<DepartureResult> expireDisconnection(DisconnectTicket ticket) {
+        Optional<Game> found = repository.findById(ticket.gameId());
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        Game game = found.get();
+        synchronized (game) {
+            Optional<Player> player = game.findPlayer(ticket.playerId())
+                    .filter(p -> !p.isDeparted() && !p.isConnected())
+                    .filter(p -> p.getConnectionEpoch() == ticket.connectionEpoch());
+            return player.map(p -> removeParticipant(game, p, true));
+        }
+    }
+
+    private DepartureResult removeParticipant(Game game, Player player, boolean disconnected) {
+        Optional<Player> other = game.findOpponent(player.getId()).filter(p -> !p.isAi() && !p.isDeparted());
+        if (other.isEmpty()) {
+            repository.delete(game);
+            return DepartureResult.CANCELLED;
+        }
+        Player remaining = other.get();
+        String what = player.getName() + (disconnected ? " perdeu a conexão e não voltou" : " saiu da partida");
+        if (game.getState() == GameState.IN_PROGRESS) {
+            player.markDeparted();
+            game.setState(GameState.FINISHED);
+            game.setWinnerId(remaining.getId());
+            game.setCurrentTurnPlayerId(null);
+            game.setEndReason(disconnected ? GameEndReason.OPPONENT_DISCONNECTED : GameEndReason.OPPONENT_LEFT);
+            game.addEvent(what + ". " + remaining.getName() + " vence por W.O.");
+            return DepartureResult.FORFEIT;
+        }
+        if (game.getState() == GameState.FINISHED) {
+            player.markDeparted();
+            remaining.setRematchRequested(false);
+            game.addEvent(what + ". " + remaining.getName() + " pode aguardar um novo oponente.");
+            return DepartureResult.RESULT_KEPT;
+        }
+        game.removePlayer(player);
+        reopenSlot(game, remaining);
+        game.addEvent(what + ". Vaga reaberta: compartilhe o código " + game.getRoomCode() + ".");
+        return DepartureResult.SLOT_REOPENED;
+    }
+
+    /** Leaves {@code remaining} alone in the room, waiting for a new opponent. A fleet placed this round is kept. */
+    private void reopenSlot(Game game, Player remaining) {
+        if (game.getState() == GameState.FINISHED) {
+            remaining.resetForNewRound();
+            game.incrementRound();
+            game.setWinnerId(null);
+            game.setLastShot(null);
+            game.setEndReason(null);
+        }
+        remaining.setRematchRequested(false);
+        game.setCurrentTurnPlayerId(null);
+        game.setStartingPlayerIndex(0);
+        game.setState(GameState.WAITING_FOR_OPPONENT);
+    }
+
+    private static Player requireActive(Game game, String playerId) {
+        Player player = game.getPlayer(playerId);
+        if (player.isDeparted()) {
+            throw new InvalidMoveException("Você já saiu desta partida.");
+        }
+        return player;
+    }
+
     private ShotOutcome applyShot(Game game, Player shooter, Coordinate target) {
         Player defender = game.getOpponent(shooter.getId());
         ShotOutcome outcome = defender.getBoard().receiveShot(target);
@@ -188,6 +341,7 @@ public class GameService {
         if (outcome.fleetDestroyed()) {
             game.setState(GameState.FINISHED);
             game.setWinnerId(shooter.getId());
+            game.setEndReason(GameEndReason.FLEET_DESTROYED);
             game.setCurrentTurnPlayerId(null);
             game.addEvent(shooter.getName() + " afundou toda a frota e venceu a partida!");
         } else {
@@ -226,6 +380,7 @@ public class GameService {
         game.setStartingPlayerIndex((game.getStartingPlayerIndex() + 1) % game.getPlayers().size());
         game.setWinnerId(null);
         game.setLastShot(null);
+        game.setEndReason(null);
         game.setCurrentTurnPlayerId(null);
         game.setState(GameState.PLACING_SHIPS);
         game.incrementRound();
