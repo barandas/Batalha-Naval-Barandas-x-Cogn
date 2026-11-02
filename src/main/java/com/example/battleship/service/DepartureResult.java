@@ -4,8 +4,10 @@ package com.example.battleship.service;
 public enum DepartureResult {
     /** No other human was in the game: it was removed. */
     CANCELLED,
-    /** Outside the battle: the participant was removed and the room accepts a new opponent. */
+    /** Before the battle: the participant was removed and the room accepts a new opponent. */
     SLOT_REOPENED,
     /** During the battle: the remaining player wins by forfeit. */
-    FORFEIT
+    FORFEIT,
+    /** After the game ended: the result is kept and the remaining player may reopen the slot via rematch. */
+    RESULT_KEPT
 }

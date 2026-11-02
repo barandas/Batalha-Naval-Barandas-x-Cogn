@@ -510,7 +510,10 @@
         }
         $('btn-rematch').textContent = view.opponentLeft ? 'Aguardar novo oponente' : 'Revanche';
         let rematch = '';
-        if (view.opponentLeft) rematch = 'A sala continua aberta com o código ' + view.roomCode + '.';
+        if (view.opponentLeft) {
+            rematch = (isForfeit(view) ? '' : view.opponentName + ' saiu da sala. ')
+                + 'Você pode aguardar um novo oponente com o código ' + view.roomCode + '.';
+        }
         else if (view.rematchRequestedByYou) rematch = 'Aguardando ' + view.opponentName + ' aceitar a revanche...';
         else if (view.rematchRequestedByOpponent) rematch = view.opponentName + ' quer revanche!';
         $('rematch-status').textContent = rematch;

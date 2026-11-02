@@ -25,6 +25,8 @@ import org.springframework.web.socket.messaging.SessionUnsubscribeEvent;
  * Derives player presence from STOMP sessions: a player is online while at least one session is subscribed to
  * their personal topic. When the last one goes away the game service is told, and the disconnection is only
  * escalated after the grace period, so a page reload or a brief network drop is not mistaken for leaving.
+ * Count transitions and the matching game service calls happen under one lock, so a reconnect cannot slip in
+ * between them.
  */
 @Component
 public class PresenceTracker {
@@ -61,13 +63,14 @@ public class PresenceTracker {
             return;
         }
         PlayerKey key = new PlayerKey(matcher.group(1), matcher.group(2));
-        boolean firstConnection;
+        boolean reconnected;
         synchronized (this) {
             subscriptions.computeIfAbsent(headers.getSessionId(), s -> new HashMap<>())
                     .put(String.valueOf(headers.getSubscriptionId()), key);
-            firstConnection = liveSubscriptions.merge(key, 1, Integer::sum) == 1;
+            reconnected = liveSubscriptions.merge(key, 1, Integer::sum) == 1
+                    && gameService.playerConnected(key.gameId(), key.playerId());
         }
-        if (firstConnection && gameService.playerConnected(key.gameId(), key.playerId())) {
+        if (reconnected) {
             publish(key.gameId());
         }
     }
@@ -97,18 +100,14 @@ public class PresenceTracker {
     }
 
     private void release(PlayerKey key) {
-        boolean lastConnection;
+        Optional<DisconnectTicket> ticket;
         synchronized (this) {
-            int remaining = liveSubscriptions.merge(key, -1, Integer::sum);
-            lastConnection = remaining <= 0;
-            if (lastConnection) {
-                liveSubscriptions.remove(key);
+            if (liveSubscriptions.merge(key, -1, Integer::sum) > 0) {
+                return;
             }
+            liveSubscriptions.remove(key);
+            ticket = gameService.playerDisconnected(key.gameId(), key.playerId());
         }
-        if (!lastConnection) {
-            return;
-        }
-        Optional<DisconnectTicket> ticket = gameService.playerDisconnected(key.gameId(), key.playerId());
         ticket.ifPresent(t -> {
             publish(key.gameId());
             scheduler.schedule(() -> expire(t), t.gracePeriod().toMillis(), TimeUnit.MILLISECONDS);

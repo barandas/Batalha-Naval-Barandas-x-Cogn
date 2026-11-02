@@ -29,8 +29,8 @@ import org.springframework.stereotype.Service;
  * Game rules: room management, fleet placement, alternating turns, victory and rematch, plus what happens when a
  * participant leaves. A voluntary exit ({@link #leaveGame}) takes effect immediately; a dropped connection
  * ({@link #playerDisconnected}) only counts as leaving if it is not recovered within the grace period
- * ({@link #expireDisconnection}). Either way, outside the battle the slot is reopened and during the battle the
- * remaining player wins by forfeit; a game without any other human is cancelled.
+ * ({@link #expireDisconnection}). Either way, before the battle the slot is reopened, during the battle the remaining
+ * player wins by forfeit and after the end the result is kept; a game without any other human is cancelled.
  */
 @Service
 public class GameService {
@@ -93,6 +93,9 @@ public class GameService {
         Game game = repository.findByRoomCode(roomCode)
                 .orElseThrow(() -> new GameNotFoundException("Sala não encontrada: " + roomCode));
         synchronized (game) {
+            if (repository.findById(game.getId()).isEmpty()) {
+                throw new GameNotFoundException("Sala não encontrada: " + roomCode);
+            }
             if (game.getMode() != GameMode.MULTIPLAYER) {
                 throw new InvalidMoveException("Esta sala é de uma partida single player.");
             }
@@ -293,6 +296,12 @@ public class GameService {
             game.setEndReason(disconnected ? GameEndReason.OPPONENT_DISCONNECTED : GameEndReason.OPPONENT_LEFT);
             game.addEvent(what + ". " + remaining.getName() + " vence por W.O.");
             return DepartureResult.FORFEIT;
+        }
+        if (game.getState() == GameState.FINISHED) {
+            player.markDeparted();
+            remaining.setRematchRequested(false);
+            game.addEvent(what + ". " + remaining.getName() + " pode aguardar um novo oponente.");
+            return DepartureResult.RESULT_KEPT;
         }
         game.removePlayer(player);
         reopenSlot(game, remaining);

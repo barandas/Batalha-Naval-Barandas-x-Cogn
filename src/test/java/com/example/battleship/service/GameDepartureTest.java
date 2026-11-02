@@ -141,7 +141,7 @@ class GameDepartureTest {
     }
 
     @Test
-    void leavingAfterANormalEndReopensTheSlotWithoutForfeit() {
+    void leavingAfterANormalEndKeepsTheResultUntilTheWinnerReopensTheSlot() {
         Multiplayer mp = readyMultiplayerGame();
         Game game = service.getGame(mp.gameId());
         int miss = 0;
@@ -155,10 +155,50 @@ class GameDepartureTest {
         assertThat(game.getEndReason()).isEqualTo(GameEndReason.FLEET_DESTROYED);
         service.requestRematch(mp.gameId(), mp.hostId());
 
-        assertThat(service.leaveGame(mp.gameId(), mp.guestId())).isEqualTo(DepartureResult.SLOT_REOPENED);
-        assertThat(game.getState()).isEqualTo(GameState.WAITING_FOR_OPPONENT);
+        assertThat(service.leaveGame(mp.gameId(), mp.guestId())).isEqualTo(DepartureResult.RESULT_KEPT);
+        assertThat(game.getState()).isEqualTo(GameState.FINISHED);
+        assertThat(game.getWinnerId()).isEqualTo(mp.hostId());
+        assertThat(game.getEndReason()).isEqualTo(GameEndReason.FLEET_DESTROYED);
         assertThat(game.getPlayer(mp.hostId()).isRematchRequested()).isFalse();
-        assertThat(game.getWinnerId()).isNull();
+        assertThat(GameViewMapper.toView(game, mp.hostId()).opponentLeft()).isTrue();
+
+        service.requestRematch(mp.gameId(), mp.hostId());
+        assertThat(game.getState()).isEqualTo(GameState.WAITING_FOR_OPPONENT);
+        assertThat(game.getPlayers()).hasSize(1);
+    }
+
+    @Test
+    void persistentDisconnectionAfterTheFleetWasSunkKeepsTheVictory() {
+        Multiplayer mp = readyMultiplayerGame();
+        Game game = service.getGame(mp.gameId());
+        DisconnectTicket ticket = service.playerDisconnected(mp.gameId(), mp.guestId()).orElseThrow();
+        for (Coordinate target : TestFleets.stackedCells()) {
+            service.fire(mp.gameId(), mp.hostId(), target);
+            if (game.getState() == GameState.FINISHED) {
+                break;
+            }
+            game.setCurrentTurnPlayerId(mp.hostId());
+        }
+
+        assertThat(service.expireDisconnection(ticket)).contains(DepartureResult.RESULT_KEPT);
+        assertThat(game.getState()).isEqualTo(GameState.FINISHED);
+        assertThat(game.getWinnerId()).isEqualTo(mp.hostId());
+        assertThat(game.getEndReason()).isEqualTo(GameEndReason.FLEET_DESTROYED);
+    }
+
+    @Test
+    void joiningARoomCancelledWhileWaitingForItsLockFails() {
+        Game cancelled = new Game("ABC123", GameMode.MULTIPLAYER, null);
+        GameRepository staleLookup = new GameRepository() {
+            @Override
+            public Optional<Game> findByRoomCode(String roomCode) {
+                return Optional.of(cancelled);
+            }
+        };
+        GameService joining = new GameService(staleLookup, new AIService(), new Random(1));
+
+        assertThatThrownBy(() -> joining.joinGame("ABC123", "Late")).isInstanceOf(GameNotFoundException.class);
+        assertThat(cancelled.getPlayers()).isEmpty();
     }
 
     // ------------------------------------------------------------------ disconnections
