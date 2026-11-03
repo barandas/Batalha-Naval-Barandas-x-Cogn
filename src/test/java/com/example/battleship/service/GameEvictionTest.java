@@ -1,6 +1,7 @@
 package com.example.battleship.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.battleship.model.Difficulty;
 import com.example.battleship.model.GameMode;
@@ -36,6 +37,57 @@ class GameEvictionTest {
         assertThat(repository.findAll()).isEmpty();
         assertThat(repository.findById(single.game().getId())).isEmpty();
         assertThat(repository.existsByRoomCode(room.game().getRoomCode())).isFalse();
+    }
+
+    @Test
+    void massCreationIsCappedAndMemoryIsFreedOnceGamesGoIdle() {
+        int cap = 50;
+        Instant start = Instant.now();
+        GameService capped = new GameService(repository, new AIService(new Random(1)), new Random(1),
+                Clock.fixed(start, ZoneOffset.UTC), GameService.DEFAULT_RECONNECT_GRACE, cap);
+
+        for (int i = 0; i < cap; i++) {
+            capped.createGame("Mallory", i % 2 == 0 ? GameMode.SINGLE_PLAYER : GameMode.MULTIPLAYER, null);
+        }
+        for (int i = 0; i < 1000; i++) {
+            assertThatThrownBy(() -> capped.createGame("Mallory", GameMode.SINGLE_PLAYER, null))
+                    .isInstanceOf(ServerBusyException.class);
+        }
+        assertThat(repository.count()).isEqualTo(cap);
+
+        GameService later = new GameService(repository, new AIService(new Random(1)), new Random(1),
+                Clock.fixed(Instant.now().plus(IDLE).plusSeconds(1), ZoneOffset.UTC),
+                GameService.DEFAULT_RECONNECT_GRACE, cap);
+        assertThat(later.evictIdleGames(IDLE, id -> false)).isEqualTo(cap);
+        assertThat(repository.count()).isZero();
+
+        later.createGame("Ana", GameMode.SINGLE_PLAYER, Difficulty.EASY);
+        assertThat(repository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentCreationNeverExceedsTheCap() throws InterruptedException {
+        int cap = 20;
+        GameService capped = new GameService(repository, new AIService(new Random(1)), new Random(1),
+                Clock.systemUTC(), GameService.DEFAULT_RECONNECT_GRACE, cap);
+        Thread[] threads = new Thread[8];
+        for (int t = 0; t < threads.length; t++) {
+            threads[t] = new Thread(() -> {
+                for (int i = 0; i < 50; i++) {
+                    try {
+                        capped.createGame("Mallory", GameMode.MULTIPLAYER, null);
+                    } catch (ServerBusyException ignored) {
+                        // expected once the cap is reached
+                    }
+                }
+            });
+            threads[t].start();
+        }
+        for (Thread thread : threads) {
+            thread.join();
+        }
+
+        assertThat(repository.count()).isEqualTo(cap);
     }
 
     @Test

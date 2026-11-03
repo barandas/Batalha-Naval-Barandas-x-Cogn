@@ -42,17 +42,20 @@ public class GameService {
     static final int ROOM_CODE_LENGTH = 6;
     private static final int MAX_NAME_LENGTH = 20;
     public static final Duration DEFAULT_RECONNECT_GRACE = Duration.ofSeconds(60);
+    public static final int DEFAULT_MAX_ACTIVE_GAMES = 2000;
 
     private final GameRepository repository;
     private final AIService aiService;
     private final Random random;
     private final Clock clock;
     private final Duration reconnectGrace;
+    private final int maxActiveGames;
 
     @Autowired
     public GameService(GameRepository repository, AIService aiService,
-                       @Value("${battleship.reconnect-grace:60s}") Duration reconnectGrace) {
-        this(repository, aiService, new SecureRandom(), Clock.systemUTC(), reconnectGrace);
+                       @Value("${battleship.reconnect-grace:60s}") Duration reconnectGrace,
+                       @Value("${battleship.max-active-games:" + DEFAULT_MAX_ACTIVE_GAMES + "}") int maxActiveGames) {
+        this(repository, aiService, new SecureRandom(), Clock.systemUTC(), reconnectGrace, maxActiveGames);
     }
 
     public GameService(GameRepository repository, AIService aiService, Random random) {
@@ -61,16 +64,28 @@ public class GameService {
 
     public GameService(GameRepository repository, AIService aiService, Random random, Clock clock,
                        Duration reconnectGrace) {
+        this(repository, aiService, random, clock, reconnectGrace, DEFAULT_MAX_ACTIVE_GAMES);
+    }
+
+    public GameService(GameRepository repository, AIService aiService, Random random, Clock clock,
+                       Duration reconnectGrace, int maxActiveGames) {
+        if (maxActiveGames < 1) {
+            throw new IllegalArgumentException("maxActiveGames must be positive");
+        }
         this.repository = repository;
         this.aiService = aiService;
         this.random = random;
         this.clock = clock;
         this.reconnectGrace = reconnectGrace;
+        this.maxActiveGames = maxActiveGames;
     }
 
     public PlayerSession createGame(String playerName, GameMode mode, Difficulty difficulty) {
         if (mode == null) {
             throw new InvalidMoveException("Modo de jogo é obrigatório.");
+        }
+        if (repository.count() >= maxActiveGames) {
+            throw serverFull();
         }
         Difficulty effectiveDifficulty = mode == GameMode.SINGLE_PLAYER
                 ? (difficulty == null ? Difficulty.MEDIUM : difficulty)
@@ -88,7 +103,9 @@ public class GameService {
         } else {
             game.addEvent("Sala " + game.getRoomCode() + " criada. Aguardando oponente...");
         }
-        repository.save(game);
+        if (!repository.saveIfBelow(game, maxActiveGames)) {
+            throw serverFull();
+        }
         return new PlayerSession(game, host);
     }
 
@@ -357,6 +374,11 @@ public class GameService {
         game.setCurrentTurnPlayerId(null);
         game.setStartingPlayerIndex(0);
         game.setState(GameState.WAITING_FOR_OPPONENT);
+    }
+
+    private static ServerBusyException serverFull() {
+        return new ServerBusyException(
+                "O servidor atingiu o limite de partidas simultâneas. Tente novamente em alguns minutos.");
     }
 
     private static Player requireActive(Game game, String playerId) {

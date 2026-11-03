@@ -21,6 +21,23 @@ public class GameRepository {
         return game;
     }
 
+    /**
+     * Stores a new game only while fewer than {@code maxGames} are held, so creating games cannot exhaust memory.
+     *
+     * @return whether the game was stored
+     */
+    public synchronized boolean saveIfBelow(Game game, int maxGames) {
+        if (gamesById.size() >= maxGames) {
+            return false;
+        }
+        save(game);
+        return true;
+    }
+
+    public int count() {
+        return gamesById.size();
+    }
+
     public Optional<Game> findById(String id) {
         return id == null ? Optional.empty() : Optional.ofNullable(gamesById.get(id));
     }

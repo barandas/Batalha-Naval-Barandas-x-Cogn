@@ -3,10 +3,13 @@ package com.example.battleship.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -20,6 +23,8 @@ import com.example.battleship.service.DepartureResult;
 import com.example.battleship.service.GameNotFoundException;
 import com.example.battleship.service.GameService;
 import com.example.battleship.service.PlayerSession;
+import com.example.battleship.service.ServerBusyException;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -39,6 +44,9 @@ class GameRestControllerTest {
     @MockitoBean
     private GameUpdatePublisher publisher;
 
+    @MockitoBean
+    private GameCreationRateLimiter creationRateLimiter;
+
     @Test
     void createsSinglePlayerGame() throws Exception {
         Game game = new Game("ABC123", GameMode.SINGLE_PLAYER, Difficulty.HARD);
@@ -56,6 +64,33 @@ class GameRestControllerTest {
                 .andExpect(jsonPath("$.game.opponentName").value("Computador"))
                 .andExpect(jsonPath("$.game.ownBoard.length()").value(10))
                 .andExpect(jsonPath("$.game.enemyBoard[0][0]").value("EMPTY"));
+    }
+
+    @Test
+    void creatingTooManyGamesReturns429WithoutCreatingOne() throws Exception {
+        doThrow(new RateLimitExceededException(Duration.ofMillis(4500))).when(creationRateLimiter).acquire("10.1.2.3");
+
+        mvc.perform(post("/api/games").contentType(MediaType.APPLICATION_JSON)
+                        .with(request -> {
+                            request.setRemoteAddr("10.1.2.3");
+                            return request;
+                        })
+                        .content("{\"playerName\":\"Mallory\",\"mode\":\"SINGLE_PLAYER\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "5"))
+                .andExpect(jsonPath("$.message").exists());
+        verify(gameService, never()).createGame(anyString(), any(), any());
+    }
+
+    @Test
+    void fullServerReturns503() throws Exception {
+        when(gameService.createGame("Ana", GameMode.MULTIPLAYER, null))
+                .thenThrow(new ServerBusyException("Servidor cheio."));
+
+        mvc.perform(post("/api/games").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerName\":\"Ana\",\"mode\":\"MULTIPLAYER\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("Servidor cheio."));
     }
 
     @Test
@@ -166,6 +201,6 @@ class GameRestControllerTest {
         mvc.perform(post("/api/games/{id}/leave", "g1").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"playerId\":\"p1\"}"))
                 .andExpect(jsonPath("$.result").value("CANCELLED"));
-        verify(publisher, org.mockito.Mockito.never()).publish(any());
+        verify(publisher, never()).publish(any());
     }
 }
