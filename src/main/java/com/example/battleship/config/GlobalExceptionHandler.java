@@ -1,13 +1,16 @@
 package com.example.battleship.config;
 
+import com.example.battleship.controller.RateLimitExceededException;
 import com.example.battleship.dto.ErrorResponse;
 import com.example.battleship.model.InvalidMoveException;
 import com.example.battleship.service.GameNotFoundException;
+import com.example.battleship.service.ServerBusyException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -36,6 +39,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidMoveException.class)
     public ResponseEntity<ErrorResponse> handleInvalidMove(InvalidMoveException ex) {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleRateLimit(RateLimitExceededException ex) {
+        long seconds = Math.max(1, (ex.getRetryAfter().toMillis() + 999) / 1000);
+        HttpStatus status = HttpStatus.TOO_MANY_REQUESTS;
+        return ResponseEntity.status(status)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(seconds))
+                .body(ErrorResponse.of(status.value(), status.getReasonPhrase(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(ServerBusyException.class)
+    public ResponseEntity<ErrorResponse> handleServerBusy(ServerBusyException ex) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

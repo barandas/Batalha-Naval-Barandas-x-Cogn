@@ -15,6 +15,7 @@ import com.example.battleship.model.Game;
 import com.example.battleship.service.DepartureResult;
 import com.example.battleship.service.GameService;
 import com.example.battleship.service.PlayerSession;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -33,15 +34,19 @@ public class GameRestController {
 
     private final GameService gameService;
     private final GameUpdatePublisher publisher;
+    private final GameCreationRateLimiter creationRateLimiter;
 
-    public GameRestController(GameService gameService, GameUpdatePublisher publisher) {
+    public GameRestController(GameService gameService, GameUpdatePublisher publisher,
+                              GameCreationRateLimiter creationRateLimiter) {
         this.gameService = gameService;
         this.publisher = publisher;
+        this.creationRateLimiter = creationRateLimiter;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public JoinResponse createGame(@Valid @RequestBody CreateGameRequest request) {
+    public JoinResponse createGame(@Valid @RequestBody CreateGameRequest request, HttpServletRequest http) {
+        creationRateLimiter.acquire(http.getRemoteAddr());
         PlayerSession session = gameService.createGame(request.playerName(), request.mode(), request.difficulty());
         return toResponse(session);
     }

@@ -81,6 +81,12 @@ Saída voluntária (botão "Sair" → `POST /api/games/{gameId}/leave`) e queda 
 - Os códigos de sala são gerados com `SecureRandom`.
 - Partidas sem nenhuma ação há `battleship.idle-timeout` (padrão `30m`) e sem nenhuma aba aberta são removidas da
   memória (`IdleGameCleaner`, a cada `battleship.cleanup-interval`, padrão `PT5M`).
+- O servidor guarda no máximo `battleship.max-active-games` partidas (padrão `2000`); acima disso `POST /api/games`
+  responde `503` até a limpeza liberar espaço.
+- `POST /api/games` tem limite por IP (`GameCreationRateLimiter`): `battleship.create-rate-limit.capacity` partidas
+  (padrão `10`) a cada `battleship.create-rate-limit.period` (padrão `1m`); acima disso responde `429` com
+  `Retry-After`. Endereços IPv6 são agrupados por prefixo /64. Atrás de um proxy reverso (Render), o IP do cliente vem
+  do `X-Forwarded-For` enviado por proxies internos confiáveis (`server.forward-headers-strategy=native`).
 
 ## Arquitetura
 
@@ -146,7 +152,7 @@ partida inexistente).
 
 ## Testes
 
-`mvn test` executa 96 testes:
+`mvn test` executa 113 testes:
 
 - `BoardTest`, `CoordinateTest`: posicionamento, limites, sobreposição, tiros (água/acerto/afundou), tiro repetido,
   frota destruída, posicionamento aleatório.
@@ -154,7 +160,9 @@ partida inexistente).
   da IA, revanche.
 - `AIServiceTest`: cada nível termina partidas sem repetir tiros, modo alvo/linha, paridade, densidade e
   comparação de desempenho entre níveis.
-- `GameRestControllerTest` (`@WebMvcTest`): contratos REST e `GlobalExceptionHandler`.
+- `GameRestControllerTest` (`@WebMvcTest`): contratos REST e `GlobalExceptionHandler` (incluindo `429` e `503`).
+- `GameCreationRateLimiterTest`: limite por IP, recarga com o tempo, agrupamento IPv6 /64 e limpeza da tabela.
+- `GameEvictionTest`: remoção de partidas ociosas e teto de partidas ativas (inclusive com criação concorrente).
 - `GameWebSocketIntegrationTest`: fluxo multiplayer real com cliente STOMP.
 - `GameDepartureTest`: abandono (cancelamento, vaga reaberta, W.O.), queda temporária, reconexão e desconexão
   persistente.
